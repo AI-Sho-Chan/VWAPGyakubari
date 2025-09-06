@@ -40,6 +40,7 @@ class Notifier:
     def _format_notification(self, signal: Dict) -> tuple:
         """Format notification title and message per FR-4.2."""
         code = signal["code"]
+        name = signal.get("name") or ""
         signal_type = signal["signal_type"]
         direction = signal["direction"]
         current_price = signal["current_price"]
@@ -51,6 +52,7 @@ class Notifier:
         title = f"{signal_type} シグナル発生"
         message = (
             f"銘柄コード: {code}\n"
+            f"銘柄名: {name}\n"
             f"シグナル発生時刻: {timestamp}\n"
             f"売買方向: {direction}\n"
             f"現在価格: {current_price:.0f}円\n"
@@ -127,4 +129,3 @@ class Notifier:
             "total_notifications_sent": self.notification_count,
             "last_notification_time": datetime.now().isoformat(),
         }
-

@@ -26,6 +26,7 @@ class JQuantsDataFetcher:
         self.session.headers.update({
             'Content-Type': 'application/json',
         })
+        self._name_cache: Dict[str, str] = {}
 
     def authenticate(self) -> bool:
         """Authenticate and set session Authorization header."""
@@ -113,6 +114,51 @@ class JQuantsDataFetcher:
         except Exception as e:
             logger.error(f"予期しないエラー: {e}")
             return []
+
+    def get_company_name_map(self) -> Dict[str, str]:
+        """Fetch and cache a mapping from stock code to company name.
+
+        Returns a dict: { '1301': '極洋', ... }
+        """
+        # If already cached with a reasonable size, return
+        if len(self._name_cache) >= 100:
+            return self._name_cache
+
+        try:
+            url = f"{self.base_url}/listed/info"
+            params = {"date": datetime.now().strftime("%Y-%m-%d")}
+            response = self.session.get(url, params=params)
+            response.raise_for_status()
+            data = response.json()
+            if data.get("info"):
+                for item in data["info"]:
+                    code = str(item.get("Code") or item.get("code") or "").strip()
+                    if not code:
+                        continue
+                    # Prefer Japanese company name if available
+                    name = (
+                        item.get("CompanyName")
+                        or item.get("CompanyNameFull")
+                        or item.get("Name")
+                        or item.get("CompanyNameEnglish")
+                        or ""
+                    )
+                    if name:
+                        self._name_cache[code] = str(name)
+            return self._name_cache
+        except requests.exceptions.RequestException as e:
+            logger.warning(f"銘柄名マスタ取得エラー: {e}")
+            return self._name_cache
+        except Exception as e:
+            logger.warning(f"銘柄名マスタ取得で予期しないエラー: {e}")
+            return self._name_cache
+
+    def get_company_name(self, code: str) -> Optional[str]:
+        """Get company name for code (cached)."""
+        if code in self._name_cache:
+            return self._name_cache[code]
+        mapping = self.get_company_name_map()
+        return mapping.get(code)
 
     def get_pre_market_board_info(self, code: str) -> Optional[Dict]:
         """Get pre-open board info and normalize to a common schema.

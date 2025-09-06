@@ -1,16 +1,17 @@
-# Asagake Signal Generator
+# Asagake Hybrid (Python Screener + Excel Cockpit)
 
-寄り付き逆張りスキャルピング・シグナルジェネレーター（半自動シグナル通知ツール）
+ハイブリッド型アーキテクチャ: Pythonスクリーナー（頭脳） + Excel監視コックピット（操縦席）
 
 ## 概要
 
 東京証券取引所の寄り付き前（8:55–8:59:50）の板寄せ不均衡（AOI）を監視し、寄り付き後（9:02–9:15）にアンカードVWAP（09:00基準）への回帰を狙う逆張りシグナルを生成・通知します。実行・発注は行いません（通知のみ）。
 
-## 要件
+## 要件（概略）
 
 - Python 3.10+
 - Windows 10/11（通知対応）
-- J-Quants API アカウント（無料プランで開発可、実運用は有料推奨）
+- auカブコム証券 kabuステーション® API（ローカルAPI、有効化とAPIキー設定が必要）
+- 楽天証券 マーケットスピード II RSS（Excelアドイン）
 
 ## インストール
 
@@ -18,32 +19,32 @@
 pip install -r requirements.txt
 ```
 
-### 設定
+### 設定（.env 推奨）
 
 `.env`（推奨）または `config.py` で認証情報・戦略パラメータを設定します。
 
 ```env
-JQUANTS_EMAIL=you@example.com
-JQUANTS_PASSWORD=your_password
+KABU_API_KEY=your_kabu_api_key
+KABU_API_BASE_URL=http://localhost:18080/kabusapi
+PRIME_LIST_CSV=data/prime_list.csv
+
 AOI_THRESHOLD=0.4
 AOI_STABILITY_THRESHOLD=0.1
 AVWAP_DEVIATION_MULTIPLIER=0.6
 ATR_PERIOD=5
 STOP_LOSS_ATR_MULTIPLIER=1.3
 PRE_MARKET_START_TIME=08:55:00
-SIGNAL_ENGINE_START_TIME=09:02:00
-SIGNAL_ENGINE_END_TIME=09:15:00
 DATA_FETCH_INTERVAL=10
 ```
 
 `config.py` は環境変数を自動読み込み（python-dotenv）し、未設定時はデフォルト値を使用します。APIキーなどの秘匿情報は環境変数で管理してください。
 
-## 使い方
+## 使い方（Component A: Pythonスクリーナー）
 
 通常モード（スケジューラー実行）:
 
 ```bash
-python main.py
+python main.py   # スケジュールで 8:55 に実行
 ```
 
 テストモード（即時実行）:
@@ -52,7 +53,19 @@ python main.py
 python main.py --test
 ```
 
-### オフライン・バックテスト
+即時実行:
+
+```bash
+python main.py --run-now [出力パス省略可]
+```
+
+出力: `watchlist.txt`（コピー用リストと1行1コードの併記）
+
+## Excel コックピット（Component B）
+
+`excel/COCKPIT_README.md` を参照し、RSS関数と条件付き書式を設定してください。
+
+## オフライン・バックテスト（任意）
 
 CSVからシミュレーションを行い、監視リストとシグナルを再現します。
 
@@ -95,7 +108,7 @@ VWAPGyakubari/
   - |価格−AVWAP| ≥ 0.6×ATR(5) をセットアップ条件に採用
   - 反転トリガー（前足陽線→現在足がその始値割れ等）を検知
 - Notifier:
-  - 銘柄コード、時刻、方向、トリガー価格、AVWAP（利確目標）、損切り（足極値±1.3×ATR）を通知
+  - 銘柄コード・銘柄名、時刻、方向、トリガー価格、AVWAP（利確目標）、損切り（足極値±1.3×ATR）を通知
 
 ## 注意
 

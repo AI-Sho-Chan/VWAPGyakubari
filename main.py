@@ -1,6 +1,7 @@
 """
-Asagake Signal Generator - Main Application
-寄り付き逆張りスキャルピング・シグナルジェネレーター
+Asagake Screener (Hybrid Architecture - Component A)
+寄り付き前 AOI スクリーニング専用（kabuステーション® API）
+出力: 監視銘柄コードのリスト（コンソール/テキスト）
 """
 
 import logging
@@ -16,9 +17,7 @@ except Exception:  # pragma: no cover
     ZoneInfo = None
 
 import config
-from modules.pre_market_scanner import PreMarketScanner
-from modules.signal_engine import SignalEngine
-from modules.notifier import Notifier
+from modules.kabu_screener import KabuScreener
 
 
 def setup_logging() -> None:
@@ -39,68 +38,34 @@ def setup_logging() -> None:
     root_logger.addHandler(console_handler)
 
 
-class AsagakeSignalGenerator:
-    """Asagake Signal Generator main class."""
+class AsagakeScreenerApp:
+    """Asagake Python Screener (Component A)"""
 
     def __init__(self) -> None:
         self.logger = logging.getLogger(__name__)
         self.scheduler = BlockingScheduler()
-        self.pre_market_scanner = PreMarketScanner()
-        self.signal_engine = SignalEngine()
-        self.notifier = Notifier()
-        self.monitoring_list = []
+        self.screener = KabuScreener()
+        self.watchlist_output = "watchlist.txt"
         self.is_running = False
 
     def run_pre_market_scan(self) -> None:
-        """Run pre-market scan."""
+        """8:55〜8:59:50 スキャンし、ウォッチリストを出力後に終了。"""
         try:
-            self.logger.info("寄り付き前スキャンを開始します")
+            self.logger.info("寄り付き前スクリーニングを開始します (kabu API)")
+            codes = self.screener.load_prime_codes()
+            selected = self.screener.scan(codes)
 
-            monitoring_list = self.pre_market_scanner.scan_pre_market()
+            # 出力
+            copy_str = self.screener.format_list_for_copy(selected)
+            print(copy_str)
+            self.screener.write_watchlist(selected, self.watchlist_output)
+            self.logger.info(f"選定銘柄数: {len(selected)}")
 
-            if monitoring_list:
-                self.monitoring_list = monitoring_list
-                self.signal_engine.set_monitoring_list(monitoring_list)
-
-                # Send startup notification
-                self.notifier.send_startup_notification(len(monitoring_list))
-
-                self.logger.info(f"監視対象銘柄 {len(monitoring_list)} 件を設定しました")
-            else:
-                self.logger.warning("監視対象銘柄が見つかりませんでした")
-                self.notifier.send_system_notification(
-                    "監視対象銘柄なし",
-                    "寄り付き前スキャンで監視対象銘柄が見つかりませんでした",
-                )
-
+            # スケジューラ停止（プロセス終了）
+            if self.scheduler.running:
+                self.scheduler.shutdown(wait=False)
         except Exception as e:
-            self.logger.error(f"寄り付き前スキャンでエラー: {e}")
-            self.notifier.send_error_notification(f"寄り付き前スキャンエラー: {e}")
-
-    def run_signal_monitoring(self) -> None:
-        """Run real-time signal monitoring."""
-        try:
-            if not self.monitoring_list:
-                self.logger.warning("監視対象銘柄が設定されていません")
-                return
-
-            self.logger.info("シグナル監視を開始します")
-
-            signals = self.signal_engine.start_signal_monitoring()
-
-            if signals:
-                success_count = self.notifier.send_batch_notifications(signals)
-                self.logger.info(
-                    f"シグナル {len(signals)} 件を生成し、{success_count} 件の通知を送信しました"
-                )
-            else:
-                self.logger.info("シグナルは生成されませんでした")
-
-            self.notifier.send_shutdown_notification(len(signals))
-
-        except Exception as e:
-            self.logger.error(f"シグナル監視でエラー: {e}")
-            self.notifier.send_error_notification(f"シグナル監視エラー: {e}")
+            self.logger.error(f"スクリーニングでエラー: {e}")
 
     def setup_scheduler(self) -> None:
         """Configure APScheduler jobs for JST schedule."""
@@ -110,11 +75,10 @@ class AsagakeSignalGenerator:
                 return int(h), int(m), int(s)
 
             pm_h, pm_m, pm_s = _hms(config.PRE_MARKET_START_TIME)
-            se_h, se_m, se_s = _hms(config.SIGNAL_ENGINE_START_TIME)
 
             tz = ZoneInfo("Asia/Tokyo") if ZoneInfo else None
 
-            # Pre-market scan (Mon-Fri)
+            # Screener (Mon-Fri)
             self.scheduler.add_job(
                 func=self.run_pre_market_scan,
                 trigger=CronTrigger(
@@ -124,8 +88,8 @@ class AsagakeSignalGenerator:
                     second=pm_s,
                     timezone=tz,
                 ),
-                id='pre_market_scan',
-                name='pre_market_scan',
+                id='screener',
+                name='kabu_preopen_screener',
                 max_instances=1,
             )
 
@@ -153,11 +117,8 @@ class AsagakeSignalGenerator:
     def start(self) -> None:
         """Start the application and scheduler."""
         try:
-            self.logger.info("Asagake Signal Generator を開始します")
-            self.logger.info(f"寄り付き前スキャン: 毎営業日 {config.PRE_MARKET_START_TIME}")
-            self.logger.info(
-                f"シグナル監視: 毎営業日 {config.SIGNAL_ENGINE_START_TIME} - {config.SIGNAL_ENGINE_END_TIME}"
-            )
+            self.logger.info("Asagake Screener を開始します")
+            self.logger.info(f"寄り付き前スクリーニング: 毎営業日 {config.PRE_MARKET_START_TIME}")
 
             self.is_running = True
             self.setup_scheduler()
@@ -185,23 +146,20 @@ class AsagakeSignalGenerator:
         except Exception as e:
             self.logger.error(f"アプリケーション停止エラー: {e}")
 
-    def run_manual_test(self) -> None:
-        """Run pre-market scan and signal monitoring immediately (test mode)."""
-        self.logger.info("手動テストモードを開始します")
+    def run_now(self, output: str | None = None) -> None:
+        """即時実行（テスト/手動）"""
+        self.logger.info("即時スクリーニングを開始します")
 
         try:
-            # Run pre-market scan
-            self.run_pre_market_scan()
-
-            if self.monitoring_list:
-                # Run signal monitoring
-                self.run_signal_monitoring()
-            else:
-                self.logger.info("監視対象銘柄がないため、シグナル監視をスキップします")
+            if output:
+                self.watchlist_output = output
+            codes = self.screener.load_prime_codes()
+            selected = self.screener.scan(codes)
+            print(self.screener.format_list_for_copy(selected))
+            self.screener.write_watchlist(selected, self.watchlist_output)
 
         except Exception as e:
-            self.logger.error(f"手動テストでエラー: {e}")
-            self.notifier.send_error_notification(f"手動テストエラー: {e}")
+            self.logger.error(f"即時スクリーニングでエラー: {e}")
 
 
 def main() -> None:
@@ -210,13 +168,14 @@ def main() -> None:
     logger = logging.getLogger(__name__)
 
     try:
-        app = AsagakeSignalGenerator()
+        app = AsagakeScreenerApp()
 
-        if len(sys.argv) > 1 and sys.argv[1] == "--test":
-            logger.info("テストモードで実行します")
-            app.run_manual_test()
+        if len(sys.argv) > 1 and sys.argv[1] == "--run-now":
+            out = sys.argv[2] if len(sys.argv) > 2 else None
+            logger.info("即時モードで実行します")
+            app.run_now(output=out)
         else:
-            logger.info("通常モードで実行します")
+            logger.info("スケジュールモードで実行します")
             app.start()
 
     except Exception as e:
@@ -226,4 +185,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

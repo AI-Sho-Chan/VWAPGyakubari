@@ -187,6 +187,7 @@ class SignalEngine:
 
             signal = {
                 "code": code,
+                "name": self.data_fetcher.get_company_name(code) or code,
                 "timestamp": datetime.now().isoformat(),
                 "signal_type": signal_type,
                 "direction": direction,
@@ -258,4 +259,3 @@ class SignalEngine:
             "monitoring_stocks": len(self.monitoring_list),
             "monitoring_end_time": datetime.now().isoformat(),
         }
-
