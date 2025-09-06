@@ -70,7 +70,7 @@ VWAPGyakubari/
 ├── excel/COCKPIT_README.md     # Excel側の手順書
 ├── backtest/offline_backtest.py# CSVでの再現シミュレータ
 ├── data/prime_list_example.csv # プライム銘柄CSVのサンプル（Code列）
-└── archive/                    # 旧J-Quants実装（参考保管）
+└──（旧実装はGit履歴のみで保管）
 `
 
 ## 注意

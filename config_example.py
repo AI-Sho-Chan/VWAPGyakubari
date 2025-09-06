@@ -1,11 +1,15 @@
 """
-Example configuration for Asagake Signal Generator.
+Example configuration for Asagake Hybrid (Component A: Screener)
 Copy to config.py or set via environment variables (.env recommended).
 """
 
-# J-Quants API (use environment variables in practice)
-JQUANTS_EMAIL = "your_email@example.com"
-JQUANTS_PASSWORD = "your_password"
+# Kabu Station API
+KABU_API_BASE_URL = "http://localhost:18080/kabusapi"
+KABU_API_KEY = "your_kabu_api_key"
+KABU_EXCHANGE = 1  # 1: 東証
+
+# Prime market list CSV (must contain Code column)
+PRIME_LIST_CSV = "data/prime_list.csv"
 
 # Strategy parameters
 AOI_THRESHOLD = 0.4
@@ -16,8 +20,6 @@ STOP_LOSS_ATR_MULTIPLIER = 1.3
 
 # Schedule (JST)
 PRE_MARKET_START_TIME = "08:55:00"
-SIGNAL_ENGINE_START_TIME = "09:02:00"
-SIGNAL_ENGINE_END_TIME = "09:15:00"
 
 # Data fetch interval (seconds)
 DATA_FETCH_INTERVAL = 10
@@ -25,4 +27,3 @@ DATA_FETCH_INTERVAL = 10
 # Logging
 LOG_LEVEL = "INFO"
 LOG_FILE = "asagake.log"
-

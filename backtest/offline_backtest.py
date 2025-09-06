@@ -33,7 +33,41 @@ import sys
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 import config
-from modules.signal_engine import SignalEngine
+def calc_avwap(df: pd.DataFrame, anchor_time: pd.Timestamp) -> float | None:
+    d = df[df["datetime"] >= anchor_time].copy()
+    if d.empty:
+        return None
+    if d["volume"].sum() == 0:
+        return None
+    return float((d["close"] * d["volume"]).sum() / d["volume"].sum())
+
+
+def calc_atr(df: pd.DataFrame, period: int = 5) -> float | None:
+    if len(df) < period + 1:
+        return None
+    d = df.copy()
+    d["prev_close"] = d["close"].shift(1)
+    tr1 = d["high"] - d["low"]
+    tr2 = (d["high"] - d["prev_close"]).abs()
+    tr3 = (d["low"] - d["prev_close"]).abs()
+    d["tr"] = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+    atr = d["tr"].rolling(window=period).mean().iloc[-1]
+    return float(atr) if pd.notna(atr) else None
+
+
+def check_trigger(df: pd.DataFrame, direction: str, avwap: float) -> tuple[str, float] | None:
+    if len(df) < 2:
+        return None
+    cur = df.iloc[-1]
+    prev = df.iloc[-2]
+    cp = float(cur["close"])
+    if direction == "short":
+        if cp > avwap and prev["close"] > prev["open"] and cp < float(prev["open"]):
+            return ("逆張りショート", float(prev["open"]))
+    else:
+        if cp < avwap and prev["close"] < prev["open"] and cp > float(prev["open"]):
+            return ("逆張りロング", float(prev["open"]))
+    return None
 
 
 def build_monitoring_list(aoi_csv: Path, trading_date: str) -> List[Dict]:
@@ -111,18 +145,12 @@ def run_offline_backtest(aoi_csv: Path, minute_dir: Path, trading_date: str, out
     monitoring_list = build_monitoring_list(aoi_csv, trading_date)
     logging.info(f"監視対象銘柄: {len(monitoring_list)} 件")
 
-    engine = SignalEngine()
-    engine.set_monitoring_list(monitoring_list)
-
-    # Seed price data from CSV
+    # Load data
+    d0 = pd.to_datetime(trading_date)
+    price_data: Dict[str, pd.DataFrame] = {}
     for stock in monitoring_list:
         code = stock["code"]
-        df = load_minute_csv(minute_dir, code, trading_date)
-        engine.price_data[code] = df
-
-    # Set anchor time
-    d0 = pd.to_datetime(trading_date)
-    engine.anchor_time = d0.replace(hour=9, minute=0, second=0)
+        price_data[code] = load_minute_csv(minute_dir, code, trading_date)
 
     # Simulate minute-by-minute from 09:02 to 09:15
     start_t = d0.replace(hour=9, minute=2, second=0)
@@ -134,15 +162,37 @@ def run_offline_backtest(aoi_csv: Path, minute_dir: Path, trading_date: str, out
         for stock in monitoring_list:
             code = stock["code"]
             direction = stock["direction"]
-            df_full = engine.price_data[code]
+            df_full = price_data[code]
             # Use data up to current_t
             df = df_full[df_full["datetime"] <= current_t].copy()
             if len(df) < 2:
                 continue
-            engine.price_data[code] = df
-            sig = engine._check_signal(code, direction)  # reuse existing logic
-            if sig:
-                signals.append(sig)
+            avwap = calc_avwap(df, d0.replace(hour=9, minute=0, second=0))
+            atr = calc_atr(df, config.ATR_PERIOD)
+            if avwap is None or atr is None:
+                current_t = current_t + pd.Timedelta(minutes=1)
+                continue
+            cp = float(df["close"].iloc[-1])
+            if abs(cp - avwap) < config.AVWAP_DEVIATION_MULTIPLIER * atr:
+                current_t = current_t + pd.Timedelta(minutes=1)
+                continue
+            trig = check_trigger(df, direction, avwap)
+            if trig:
+                stype, entry = trig
+                signals.append({
+                    "code": code,
+                    "timestamp": current_t.isoformat(),
+                    "signal_type": stype,
+                    "direction": direction,
+                    "current_price": cp,
+                    "avwap": avwap,
+                    "atr": atr,
+                    "entry_trigger_price": entry,
+                    "target_price": avwap,
+                    "stop_loss_price": (df.iloc[-1]["high"] + config.STOP_LOSS_ATR_MULTIPLIER * atr) if direction == "short" else (df.iloc[-1]["low"] - config.STOP_LOSS_ATR_MULTIPLIER * atr),
+                    "price_deviation": abs(cp - avwap),
+                    "setup_threshold": config.AVWAP_DEVIATION_MULTIPLIER * atr,
+                })
         current_t = current_t + pd.Timedelta(minutes=1)
 
     # Restore full data (optional)

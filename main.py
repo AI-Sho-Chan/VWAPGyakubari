@@ -1,7 +1,7 @@
 """
 Asagake Screener (Hybrid Architecture - Component A)
-寄り付き前 AOI スクリーニング専用（kabuステーション® API）
-出力: 監視銘柄コードのリスト（コンソール/テキスト）
+Pre-open AOI screening using kabu Station API.
+Output: list of stock codes (console/text file).
 """
 
 import logging
@@ -39,7 +39,7 @@ def setup_logging() -> None:
 
 
 class AsagakeScreenerApp:
-    """Asagake Python Screener (Component A)"""
+    """Asagake Python Screener (Component A)."""
 
     def __init__(self) -> None:
         self.logger = logging.getLogger(__name__)
@@ -49,23 +49,23 @@ class AsagakeScreenerApp:
         self.is_running = False
 
     def run_pre_market_scan(self) -> None:
-        """8:55〜8:59:50 スキャンし、ウォッチリストを出力後に終了。"""
+        """Run 08:55–08:59:50 screening and write watchlist, then stop."""
         try:
-            self.logger.info("寄り付き前スクリーニングを開始します (kabu API)")
+            self.logger.info("Starting pre-open screening (kabu API)")
             codes = self.screener.load_prime_codes()
             selected = self.screener.scan(codes)
 
-            # 出力
+            # Output
             copy_str = self.screener.format_list_for_copy(selected)
             print(copy_str)
             self.screener.write_watchlist(selected, self.watchlist_output)
-            self.logger.info(f"選定銘柄数: {len(selected)}")
+            self.logger.info(f"Selected codes: {len(selected)}")
 
-            # スケジューラ停止（プロセス終了）
+            # Stop scheduler (exit process)
             if self.scheduler.running:
                 self.scheduler.shutdown(wait=False)
         except Exception as e:
-            self.logger.error(f"スクリーニングでエラー: {e}")
+            self.logger.error(f"Screening error: {e}")
 
     def setup_scheduler(self) -> None:
         """Configure APScheduler jobs for JST schedule."""
@@ -78,7 +78,7 @@ class AsagakeScreenerApp:
 
             tz = ZoneInfo("Asia/Tokyo") if ZoneInfo else None
 
-            # Screener (Mon-Fri)
+            # Screener (Mon–Fri)
             self.scheduler.add_job(
                 func=self.run_pre_market_scan,
                 trigger=CronTrigger(
@@ -93,21 +93,6 @@ class AsagakeScreenerApp:
                 max_instances=1,
             )
 
-            # Signal monitoring (Mon-Fri)
-            self.scheduler.add_job(
-                func=self.run_signal_monitoring,
-                trigger=CronTrigger(
-                    day_of_week='mon-fri',
-                    hour=se_h,
-                    minute=se_m,
-                    second=se_s,
-                    timezone=tz,
-                ),
-                id='signal_monitoring',
-                name='signal_monitoring',
-                max_instances=1,
-            )
-
             self.logger.info("スケジューラーを設定しました")
 
         except Exception as e:
@@ -117,38 +102,37 @@ class AsagakeScreenerApp:
     def start(self) -> None:
         """Start the application and scheduler."""
         try:
-            self.logger.info("Asagake Screener を開始します")
-            self.logger.info(f"寄り付き前スクリーニング: 毎営業日 {config.PRE_MARKET_START_TIME}")
+            self.logger.info("Asagake Screener starting")
+            self.logger.info(f"Pre-open screening: Weekdays {config.PRE_MARKET_START_TIME} JST")
 
             self.is_running = True
             self.setup_scheduler()
             self.scheduler.start()
 
         except KeyboardInterrupt:
-            self.logger.info("ユーザーによる停止要求を受信しました")
+            self.logger.info("Received user stop request")
             self.stop()
         except Exception as e:
             self.logger.error(f"アプリケーション実行エラー: {e}")
-            self.notifier.send_error_notification(f"アプリケーションエラー: {e}")
             raise
 
     def stop(self) -> None:
         """Stop the application and scheduler."""
         try:
-            self.logger.info("Asagake Signal Generator を停止します")
+            self.logger.info("Stopping Asagake Screener")
             self.is_running = False
 
             if self.scheduler.running:
                 self.scheduler.shutdown()
 
-            self.logger.info("アプリケーションが正常に終了しました")
+            self.logger.info("Application exited cleanly")
 
         except Exception as e:
             self.logger.error(f"アプリケーション停止エラー: {e}")
 
     def run_now(self, output: str | None = None) -> None:
-        """即時実行（テスト/手動）"""
-        self.logger.info("即時スクリーニングを開始します")
+        """Run screening immediately (manual/test)."""
+        self.logger.info("Starting immediate screening")
 
         try:
             if output:
@@ -159,7 +143,7 @@ class AsagakeScreenerApp:
             self.screener.write_watchlist(selected, self.watchlist_output)
 
         except Exception as e:
-            self.logger.error(f"即時スクリーニングでエラー: {e}")
+            self.logger.error(f"Immediate screening error: {e}")
 
 
 def main() -> None:
@@ -172,10 +156,10 @@ def main() -> None:
 
         if len(sys.argv) > 1 and sys.argv[1] == "--run-now":
             out = sys.argv[2] if len(sys.argv) > 2 else None
-            logger.info("即時モードで実行します")
+            logger.info("Running in immediate mode")
             app.run_now(output=out)
         else:
-            logger.info("スケジュールモードで実行します")
+            logger.info("Running in scheduled mode")
             app.start()
 
     except Exception as e:
