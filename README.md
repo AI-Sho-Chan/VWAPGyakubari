@@ -1,29 +1,24 @@
-# Asagake Hybrid (Python Screener + Excel Cockpit)
+﻿# Asagake Hybrid (Python Screener + Excel Cockpit)
 
-ハイブリッド型アーキテクチャ: Pythonスクリーナー（頭脳） + Excel監視コックピット（操縦席）
+ハイブリッド構成: Pythonスクリーナー（寄り前AOIの重い走査） + Excelコックピット（寄り後の視覚的監視）
 
 ## 概要
-
-東京証券取引所の寄り付き前（8:55–8:59:50）の板寄せ不均衡（AOI）を監視し、寄り付き後（9:02–9:15）にアンカードVWAP（09:00基準）への回帰を狙う逆張りシグナルを生成・通知します。実行・発注は行いません（通知のみ）。
+- 08:55–08:59:50 JST: Pythonが東証プライム銘柄の板からAOIを10秒間隔で記録し、安定性と振れ幅で候補を抽出
+- 09:00–09:15 JST: トレーダーがExcelで候補銘柄を監視（RSSでリアルタイム更新・条件付き書式で可視化）
 
 ## 要件（概略）
-
 - Python 3.10+
-- Windows 10/11（通知対応）
-- auカブコム証券 kabuステーション® API（ローカルAPI、有効化とAPIキー設定が必要）
+- Windows 10/11（通知は不要）
+- auカブコム証券 kabuステーション® API（ローカルAPI・APIキー）
 - 楽天証券 マーケットスピード II RSS（Excelアドイン）
 
 ## インストール
-
-```bash
+`ash
 pip install -r requirements.txt
-```
+`
 
 ### 設定（.env 推奨）
-
-`.env`（推奨）または `config.py` で認証情報・戦略パラメータを設定します。
-
-```env
+`env
 KABU_API_KEY=your_kabu_api_key
 KABU_API_BASE_URL=http://localhost:18080/kabusapi
 PRIME_LIST_CSV=data/prime_list.csv
@@ -35,86 +30,52 @@ ATR_PERIOD=5
 STOP_LOSS_ATR_MULTIPLIER=1.3
 PRE_MARKET_START_TIME=08:55:00
 DATA_FETCH_INTERVAL=10
-```
-
-`config.py` は環境変数を自動読み込み（python-dotenv）し、未設定時はデフォルト値を使用します。APIキーなどの秘匿情報は環境変数で管理してください。
+`
 
 ## 使い方（Component A: Pythonスクリーナー）
-
-通常モード（スケジューラー実行）:
-
-```bash
-python main.py   # スケジュールで 8:55 に実行
-```
-
-テストモード（即時実行）:
-
-```bash
-python main.py --test
-```
-
-即時実行:
-
-```bash
-python main.py --run-now [出力パス省略可]
-```
-
-出力: `watchlist.txt`（コピー用リストと1行1コードの併記）
+- スケジュール実行（平日8:55に自動起動）
+`ash
+python main.py
+`
+- 即時実行
+`ash
+python main.py --run-now [watchlist出力パス任意]
+`
+- 出力: watchlist.txt（コピーしやすいPythonリストと、1行1コード表記を併記）
 
 ## Excel コックピット（Component B）
-
-`excel/COCKPIT_README.md` を参照し、RSS関数と条件付き書式を設定してください。
+- excel/COCKPIT_README.md を参照（RSS関数の例、AVWAP/ATR計算、乖離率の条件付き書式を解説）
 
 ## オフライン・バックテスト（任意）
-
-CSVからシミュレーションを行い、監視リストとシグナルを再現します。
-
-準備:
-- AOIサンプルCSV `aoi_samples.csv`（列: `code,timestamp,aoi`。時刻はJST、08:55–08:59:50の10秒刻み）
-- 1分足CSVディレクトリ `data/minute/`（銘柄ごとにCSV。列: `datetime,open,high,low,close,volume`。JSTで当日分を含む）
-
-実行例:
-```bash
+- CSVから監視リストとシグナルを再現
+`ash
 python backtest/offline_backtest.py \
   --aoi data/aoi_samples.csv \
   --minute-dir data/minute \
   --date 2025-09-02 \
   --output backtest/signals_20250902.json
-```
+`
+- 入力CSV要件
+  - AOI: code,timestamp,aoi（JST、08:55–08:59:50）
+  - 1分足: datetime,open,high,low,close,volume（JST）
 
 ## 構成
-
-```
+`
 VWAPGyakubari/
-├── main.py                 # メインアプリ（スケジューラー）
-├── config.py               # 設定（env優先）
-├── requirements.txt
+├── main.py                      # スクリーナー実行（APScheduler）
+├── config.py                    # 設定（.env優先）
 ├── modules/
-│   ├── __init__.py
-│   ├── data_fetcher.py     # J-Quants API I/O
-│   ├── pre_market_scanner.py  # AOI監視・選定
-│   └── signal_engine.py    # AVWAP/ATR計算・トリガー検知
-└── README.md
-```
-
-## 仕様対応（抜粋）
-
-- 認証: J-Quants API リフレッシュ→IDトークン取得
-- Pre-Market Scanner:
-  - 8:55–8:59:50 の間、10秒間隔で AOI を記録
-  - 終了時点の |AOI| ≥ 0.4 かつ AOI標準偏差 ≤ 閾値 を監視対象に選定
-- Signal Engine:
-  - 09:00 アンカーの AVWAP、ATR(5) を算出
-  - |価格−AVWAP| ≥ 0.6×ATR(5) をセットアップ条件に採用
-  - 反転トリガー（前足陽線→現在足がその始値割れ等）を検知
-- Notifier:
-  - 銘柄コード・銘柄名、時刻、方向、トリガー価格、AVWAP（利確目標）、損切り（足極値±1.3×ATR）を通知
+│   ├── kabu_data_fetcher.py    # kabu API認証・板情報取得
+│   └── kabu_screener.py        # AOI記録・候補抽出・出力
+├── excel/COCKPIT_README.md     # Excel側の手順書
+├── backtest/offline_backtest.py# CSVでの再現シミュレータ
+├── data/prime_list_example.csv # プライム銘柄CSVのサンプル（Code列）
+└── archive/                    # 旧J-Quants実装（参考保管）
+`
 
 ## 注意
-
-- J-Quants のエンドポイントはプランにより minute 足の提供が異なる可能性があります。本実装の minute 取得エンドポイントは確認のうえ適宜修正してください。
-- タイムゾーンは APScheduler の CronTrigger に Asia/Tokyo を設定（zoneinfo 利用）。Windows では `tzdata` パッケージを利用します。
+- kabu APIはローカルAPIです。kabuステーションを起動しAPIキーを設定のうえご利用ください。
+- Excel RSS関数の記法は環境により異なります。実環境のヘルプに従ってください。
 
 ## ライセンス / 免責
-
 本ツールは教育・研究目的で提供されます。投資判断は自己責任でお願いします。
